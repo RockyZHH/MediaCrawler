@@ -1,9 +1,11 @@
 import asyncio
 import json
+import httpx
+from datetime import datetime
+import os
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlencode
-
-import httpx
+from enum import Enum
 from playwright.async_api import BrowserContext, Page
 
 from tools import utils
@@ -11,6 +13,11 @@ from tools import utils
 from .exception import DataFetchError, IPBlockError
 from .field import SearchNoteType, SearchSortType
 from .help import get_search_id, sign
+
+
+class NoteType(Enum):
+    NORMAL = "normal"
+    VIDEO = "video"
 
 
 class XHSClient:
@@ -149,6 +156,10 @@ class XHSClient:
         self.headers["Cookie"] = cookie_str
         self.cookie_dict = cookie_dict
 
+    async def get_self_info(self):
+        uri = "/api/sns/web/v1/user/selfinfo"
+        return await self.get(uri)
+
     async def get_note_by_keyword(
             self, keyword: str,
             page: int = 1, page_size: int = 20,
@@ -263,3 +274,132 @@ class XHSClient:
             await asyncio.sleep(crawl_interval)
             result.extend(comments)
         return result
+
+    async def get_upload_files_permit(self, file_type: str, count: int = 1) -> tuple:
+        """获取文件上传的 id
+
+        :param file_type: 文件类型，["images", "video"]
+        :param count: 文件数量
+        :return:
+        """
+        uri = "/api/media/v1/upload/web/permit"
+        params = {
+            "biz_name": "spectrum",
+            "scene": file_type,
+            "file_count": count,
+            "version": "1",
+            "source": "web",
+        }
+        res = await self.get(uri, params)
+        temp_permit = res["uploadTempPermits"][0]
+        file_id = temp_permit["fileIds"][0]
+        token = temp_permit["token"]
+        return file_id, token
+
+    async def upload_file(
+            self,
+            file_id: str,
+            token: str,
+            file_path: str,
+            content_type: str = "image/jpeg",
+    ):
+        """ 将文件上传至指定文件 id 处
+
+        :param file_id: 上传文件 id
+        :param token: 上传授权验证 token
+        :param file_path: 文件路径，暂只支持本地文件路径
+        :param content_type:  【"video/mp4","image/jpeg","image/png"】
+        :return:
+        """
+        # 5M 为一个 part
+        max_file_size = 5 * 1024 * 1024
+        url = "https://ros-upload.xiaohongshu.com/" + file_id
+        if os.path.getsize(file_path) > max_file_size and content_type == "video/mp4":
+            raise Exception("video too large, < 5M")
+            # return self.upload_file_with_slice(file_id, token, file_path)
+        else:
+            headers = {"X-Cos-Security-Token": token, "Content-Type": content_type}
+            with open(file_path, "rb") as f:
+                return self.request("PUT", url, data=f, headers=headers)
+
+    async def create_note(self, title, desc, note_type, ats: list = None, topics: list = None,
+                          image_info: dict = None,
+                          video_info: dict = None,
+                          post_time: str = None, is_private: bool = False):
+        """创建日志"""
+
+        if post_time:
+            post_date_time = datetime.strptime(post_time, "%Y-%m-%d %H:%M:%S")
+            post_time = round(int(post_date_time.timestamp()) * 1000)
+        uri = "/web_api/sns/v2/note"
+        business_binds = {
+            "version": 1,
+            "noteId": 0,
+            "noteOrderBind": {},
+            "notePostTiming": {
+                "postTime": post_time
+            },
+            "noteCollectionBind": {
+                "id": ""
+            }
+        }
+
+        data = {
+            "common": {
+                "type": note_type,
+                "title": title,
+                "note_id": "",
+                "desc": desc,
+                "source": '{"type":"web","ids":"","extraInfo":"{\\"subType\\":\\"official\\"}"}',
+                "business_binds": json.dumps(business_binds, separators=(",", ":")),
+                "ats": ats,
+                "hash_tag": topics,
+                "post_loc": {},
+                "privacy_info": {"op_type": 1, "type": int(is_private)},
+            },
+            "image_info": image_info,
+            "video_info": video_info,
+        }
+        headers = {
+            "Referer": "https://creator.xiaohongshu.com/"
+        }
+        print(data)
+        return await self.post(uri, data, headers=headers)
+
+    async def create_image_note(self, title, desc, files: list,
+                                post_time: str = None,
+                                ats: list = None,
+                                topics: list = None,
+                                is_private: bool = False,
+                                ):
+        """发布图文笔记
+
+        :param title: 笔记标题
+        :param desc: 笔记详情
+        :param files: 文件路径列表，目前只支持本地路径
+        :param post_time: 可选，发布时间，例如 "2023-10-11 12:11:11"
+        :param ats: 可选，@用户信息
+        :param topics: 可选，话题信息
+        :param is_private: 可选，是否私密发布
+        :return:
+        """
+        if ats is None:
+            ats = []
+        if topics is None:
+            topics = []
+
+        images = []
+        for file in files:
+            image_id, token = await self.get_upload_files_permit("image")
+            await self.upload_file(image_id, token, file)
+            images.append(
+                {
+                    "file_id": image_id,
+                    "metadata": {"source": -1},
+                    "stickers": {"version": 2, "floating": []},
+                    "extra_info_json": '{"mimeType":"image/jpeg"}',
+                }
+            )
+        return await self.create_note(title, desc, NoteType.NORMAL.value, ats=ats, topics=topics,
+                                      image_info={"images": images}, is_private=is_private,
+                                      post_time=post_time)

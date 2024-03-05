@@ -1,19 +1,18 @@
 import asyncio
 import os
 import random
+import datetime
+import json
 from asyncio import Task
 from typing import Dict, List, Optional, Tuple
-
-from playwright.async_api import (BrowserContext, BrowserType, Page,
-                                  async_playwright)
-
+from playwright.async_api import (BrowserContext, BrowserType, Page, async_playwright)
 import config
 from base.base_crawler import AbstractCrawler
 from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import xhs as xhs_store
 from tools import utils
 from var import crawler_type_var
-
+from enum import Enum
 from .client import XHSClient
 from .exception import DataFetchError
 from .login import XHSLogin
@@ -77,17 +76,30 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 await login_obj.begin()
                 await self.xhs_client.update_cookies(browser_context=self.browser_context)
 
-            crawler_type_var.set(self.crawler_type)
-            if self.crawler_type == "search":
-                # Search for notes and retrieve their comment information.
-                await self.search()
-            elif self.crawler_type == "detail":
-                # Get the information and comments of the specified post
-                await self.get_specified_notes()
-            else:
-                pass
+            # 不搜索注释掉
+            # crawler_type_var.set(self.crawler_type)
+            # if self.crawler_type == "search":
+            #     # Search for notes and retrieve their comment information.
+            #     await self.search()
+            # elif self.crawler_type == "detail":
+            #     # Get the information and comments of the specified post
+            #     await self.get_specified_notes()
+            # else:
+            #     pass
 
+            me_info = await self.xhs_client.get_self_info()
+            print(me_info)
+            await self.create_img_note()
             utils.logger.info("[XiaoHongShuCrawler.start] Xhs Crawler finished ...")
+
+    async def create_img_note(self) -> None:
+        title = "星空的感觉"
+        desc = "下面我说两点 \n 1. 第一点 \n 2. 第二点"
+        images = [
+            "/Users/guanqingluo/Downloads/111.jpg",
+        ]
+        note = await self.xhs_client.create_image_note(title, desc, images, is_private=True, post_time="2024-03-05 23:59:00")
+        print(json.dumps(note, ensure_ascii=False, indent=2))
 
     async def search(self) -> None:
         """Search for notes and retrieve their comment information."""
