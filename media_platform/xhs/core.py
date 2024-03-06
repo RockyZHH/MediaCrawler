@@ -93,12 +93,12 @@ class XiaoHongShuCrawler(AbstractCrawler):
             utils.logger.info("[XiaoHongShuCrawler.start] Xhs Crawler finished ...")
 
     async def create_img_note(self) -> None:
-        title = "星空的感觉"
-        desc = "下面我说两点 \n 1. 第一点 \n 2. 第二点"
+        title = "不知道怎样表达，觉得好看"
+        desc = "有可能情绪已经被牵动，但是不知道怎样去表达！！！"
         images = [
-            "/Users/guanqingluo/Downloads/111.jpg",
+            "/Users/guanqingluo/Downloads/222.jpg",
         ]
-        note = await self.xhs_client.create_image_note(title, desc, images, is_private=True, post_time="2024-03-05 23:59:00")
+        note = await self.xhs_client.create_image_note(title, desc, images, is_private=False)
         print(json.dumps(note, ensure_ascii=False, indent=2))
 
     async def search(self) -> None:

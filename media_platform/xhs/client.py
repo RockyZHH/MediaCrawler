@@ -1,6 +1,7 @@
 import asyncio
 import json
 import httpx
+import aiofiles
 from datetime import datetime
 import os
 from typing import Callable, Dict, List, Optional
@@ -85,7 +86,13 @@ class XHSClient:
                 method, url, timeout=self.timeout,
                 **kwargs
             )
-        data: Dict = response.json()
+        if not len(response.text):
+            return response
+        try:
+            data = response.json()
+        except json.decoder.JSONDecodeError:
+            return response
+        # data: Dict = response.json()
         if data["success"]:
             return data.get("data", data.get("success", {}))
         elif data["code"] == self.IP_ERROR_CODE:
@@ -319,8 +326,9 @@ class XHSClient:
             # return self.upload_file_with_slice(file_id, token, file_path)
         else:
             headers = {"X-Cos-Security-Token": token, "Content-Type": content_type}
-            with open(file_path, "rb") as f:
-                return self.request("PUT", url, data=f, headers=headers)
+            # with open(file_path, "rb") as f:
+            async with aiofiles.open(file_path, "rb") as f:
+                return await self.request("PUT", url, data=f, headers=headers)
 
     async def create_note(self, title, desc, note_type, ats: list = None, topics: list = None,
                           image_info: dict = None,
@@ -360,11 +368,11 @@ class XHSClient:
             "image_info": image_info,
             "video_info": video_info,
         }
-        headers = {
-            "Referer": "https://creator.xiaohongshu.com/"
-        }
+        # headers = {
+        #     "Referer": "https://creator.xiaohongshu.com/"
+        # }
         print(data)
-        return await self.post(uri, data, headers=headers)
+        return await self.post(uri, data)
 
     async def create_image_note(self, title, desc, files: list,
                                 post_time: str = None,
